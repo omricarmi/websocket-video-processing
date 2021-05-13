@@ -1,0 +1,164 @@
+<html>
+
+<head>
+    <title>Chat</title>
+</head>
+
+<body>
+    <h1>WebSocket Chat</h1>
+    <h2>Your ID: <span id="ws-id"></span></h2>
+    <ul id='messages'>
+    </ul>
+    <div class="camera">
+        <video id="video">Video stream not available.</video>
+        <img id="image_server" alt="The screen capture will appear in this box."/>
+    </div>
+    <button id="startbutton">Take photo</button>
+    <canvas id="canvas" style="display:none;">
+    </canvas>
+    <script>
+
+        (function () {
+            const FPS = 30;
+            var client_id = Date.now()
+            document.querySelector("#ws-id").textContent = client_id;
+            var ws = new WebSocket(`ws://${window.location.href.split('//')[1].split('/')[0]}/ws/${client_id}`);
+            let isConnected = false;
+            ws.onmessage = function (event_) {
+                const event = JSON.parse(event_.data);
+                // console.log('got message');
+                if (event.type == "image") {
+                    drawPictureFromServer(event.data);
+                } else {
+                    var messages = document.getElementById('messages')
+                    var message = document.createElement('li')
+                    var content = document.createTextNode(event.data)
+                    message.appendChild(content)
+                    messages.appendChild(message)
+                }
+            };
+            ws.onclose = function (event) {
+                isConnected = false;
+                console.log('websocket closed');
+            }
+            ws.onopen = function (event) {
+                isConnected = true;
+                console.log('websocket opened');
+            }
+            function sendMessage(event) {
+                var input = document.getElementById("messageText")
+                ws.send(input.value)
+                input.value = ''
+                event.preventDefault()
+            }
+            // The width and height of the captured photo. We will set the
+            // width to the value defined here, but the height will be
+            // calculated based on the aspect ratio of the input stream.
+
+            var width = 320;    // We will scale the photo width to this
+            var height = 0;     // This will be computed based on the input stream
+
+            // |streaming| indicates whether or not we're currently streaming
+            // video from the camera. Obviously, we start at false.
+
+            var streaming = false;
+
+            // The various HTML elements we need to configure or control. These
+            // will be set by the startup() function.
+
+            var video = null;
+            var canvas = null;
+            var photo = null;
+            var startbutton = null;
+            var imageServer = null;
+            function startup() {
+                video = document.getElementById('video');
+                canvas = document.getElementById('canvas');
+                imageServer = document.getElementById('image_server');
+                photo = document.getElementById('photo');
+                startbutton = document.getElementById('startbutton');
+
+                navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                    .then(function (stream) {
+                        video.srcObject = stream;
+                        video.play();
+                    })
+                    .catch(function (err) {
+                        console.log("An error occurred: " + err);
+                    });
+
+                video.addEventListener('canplay', function (ev) {
+                    if (!streaming) {
+                        height = video.videoHeight / (video.videoWidth / width);
+
+                        // Firefox currently has a bug where the height can't be read from
+                        // the video, so we will make assumptions if this happens.
+
+                        if (isNaN(height)) {
+                            height = width / (4 / 3);
+                        }
+
+                        video.setAttribute('width', width);
+                        video.setAttribute('height', height);
+                        canvas.setAttribute('width', width);
+                        canvas.setAttribute('height', height);
+                        streaming = true;
+                    }
+                }, false);
+
+                startbutton.addEventListener('click', function (ev) {
+                    takepicture();
+                    ev.preventDefault();
+                }, false);
+
+            }
+
+            // Fill the photo with an indication that none has been
+            // captured.
+
+            // Capture a photo by fetching the current contents of the video
+            // and drawing it into a canvas, then converting that to a PNG
+            // format data URL. By drawing it on an offscreen canvas and then
+            // drawing that to the screen, we can change its size and/or apply
+            // other changes before drawing it.
+
+            function takepicture() {
+                const context = canvas.getContext('2d');
+                if (width && height) {
+                    canvas.width = width;
+                    canvas.height = height;
+                    context.drawImage(video, 0, 0, width, height);
+                    (function loop() {
+                        if (width && height) {
+                            canvas.width = width;
+                            canvas.height = height;
+                            context.drawImage(video, 0, 0, width, height);
+
+                            // quality ranges from 0.00-1.00
+                            var jpgQuality = 0.60;
+                            // get the dataURL in .jpg format
+                            var theDataURL = canvas.toDataURL('image/jpeg', jpgQuality);
+                            ws.send(theDataURL)
+                        }
+                        if (isConnected) {
+                            setTimeout(loop, 1000 / FPS); // drawing at 30fps
+                        }
+                    })();
+                }
+            }
+
+            // let imageServer = new Image();
+            function drawPictureFromServer(dataBase64) {
+                if (width && height) {
+                    imageServer.src = dataBase64;
+                }
+            }
+
+            // Set up our event listener to run the startup process
+            // once loading is complete.
+            window.addEventListener('load', startup, false);
+        })();
+    </script>
+</body>
+
+</html>
